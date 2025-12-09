@@ -12,6 +12,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Clear loading message
       activitiesList.innerHTML = "";
+      // Reset activity select options (keep placeholder)
+      if (activitySelect) activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -28,23 +30,63 @@ document.addEventListener("DOMContentLoaded", () => {
           <div class="participants">
             <strong>Participants:</strong>
             <ul>
-              ${details.participants.length > 0 ? details.participants.map(participant => `<li>${participant}</li>`).join('') : '<li>No participants yet</li>'}
+              ${details.participants.length > 0 ? details.participants.map(participant => `<li class="participant-item"><span class="participant-email">${participant}</span><button class="delete-btn" data-activity="${encodeURIComponent(name)}" data-email="${encodeURIComponent(participant)}" title="Unregister">✕</button></li>`).join('') : '<li class="participant-item">No participants yet</li>'}
             </ul>
           </div>
         `;
 
         activitiesList.appendChild(activityCard);
 
+        // Attach delete handlers for this card
+        const deleteButtons = activityCard.querySelectorAll('.delete-btn');
+        deleteButtons.forEach(btn => {
+          btn.addEventListener('click', async (e) => {
+            const email = decodeURIComponent(btn.getAttribute('data-email'));
+            const activity = decodeURIComponent(btn.getAttribute('data-activity'));
+            const li = btn.closest('li');
+
+            try {
+              const res = await fetch(`/activities/${encodeURIComponent(activity)}/unregister?email=${encodeURIComponent(email)}`, { method: 'DELETE' });
+              const json = await res.json();
+
+              if (res.ok) {
+                // Remove the participant element from the DOM
+                if (li) li.remove();
+                showMessage(json.message || `Unregistered ${email} from ${activity}`, 'success');
+                // Optionally refresh availability count by re-fetching activities
+                // For now, just update the spots text by re-fetching full list
+                // A conservative approach: refresh whole activities list
+                setTimeout(fetchActivities, 300);
+              } else {
+                showMessage(json.detail || 'Failed to unregister participant', 'error');
+              }
+            } catch (err) {
+              console.error('Error unregistering participant:', err);
+              showMessage('Failed to unregister participant', 'error');
+            }
+          });
+        });
+
         // Add option to select dropdown
-        const option = document.createElement("option");
-        option.value = name;
-        option.textContent = name;
-        activitySelect.appendChild(option);
+        if (activitySelect) {
+          const option = document.createElement("option");
+          option.value = name;
+          option.textContent = name;
+          activitySelect.appendChild(option);
+        }
       });
     } catch (error) {
       activitiesList.innerHTML = "<p>Failed to load activities. Please try again later.</p>";
       console.error("Error fetching activities:", error);
     }
+  }
+
+  function showMessage(text, type) {
+    if (!messageDiv) return;
+    messageDiv.textContent = text;
+    messageDiv.className = type === 'success' ? 'message success' : 'message error';
+    messageDiv.classList.remove('hidden');
+    setTimeout(() => messageDiv.classList.add('hidden'), 4000);
   }
 
   // Handle form submission
@@ -65,24 +107,16 @@ document.addEventListener("DOMContentLoaded", () => {
       const result = await response.json();
 
       if (response.ok) {
-        messageDiv.textContent = result.message;
-        messageDiv.className = "success";
+        showMessage(result.message, 'success');
         signupForm.reset();
+        // Refresh activities list so UI reflects the new participant
+        fetchActivities();
       } else {
-        messageDiv.textContent = result.detail || "An error occurred";
-        messageDiv.className = "error";
+        showMessage(result.detail || "An error occurred", 'error');
       }
-
-      messageDiv.classList.remove("hidden");
-
-      // Hide message after 5 seconds
-      setTimeout(() => {
-        messageDiv.classList.add("hidden");
-      }, 5000);
+      
     } catch (error) {
-      messageDiv.textContent = "Failed to sign up. Please try again.";
-      messageDiv.className = "error";
-      messageDiv.classList.remove("hidden");
+      showMessage("Failed to sign up. Please try again.", 'error');
       console.error("Error signing up:", error);
     }
   });
